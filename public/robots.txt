@@ -1,0 +1,21 @@
+# Allow all search engines to crawl the site
+User-agent: *
+Allow: /
+
+# Specific rules for important pages
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 1
+
+# Disallow admin/private areas (none currently, but good practice)
+Disallow: /admin
+Disallow: /private
+Disallow: /*.json
+
+# Sitemap location
+Sitemap: https://gammax.pages.dev/sitemap.xml
+Sitemap: https://aztryx.pages.dev/sitemap.xml

@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "include": [
+    "/data/*",
+    "/sw.js",
+    "/manifest.json"
+  ],
+  "exclude": [],
+  "rules": [
+    {
+      "type": "static",
+      "path": "/data/*",
+      "methods": ["GET"],
+      "comment": "Data files - disable all caching to force fresh downloads",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0"
+      }
+    },
+    {
+      "type": "static",
+      "path": "/sw.js",
+      "methods": ["GET"],
+      "comment": "Service Worker - must be revalidated frequently",
+      "headers": {
+        "Cache-Control": "public, max-age=3600, must-revalidate",
+        "Service-Worker-Allowed": "/"
+      }
+    },
+    {
+      "type": "static",
+      "path": "/manifest.json",
+      "methods": ["GET"],
+      "comment": "PWA manifest",
+      "headers": {
+        "Content-Type": "application/manifest+json",
+        "Cache-Control": "public, max-age=3600"
+      }
+    },
+    {
+      "type": "static",
+      "path": "/assets/*",
+      "methods": ["GET"],
+      "comment": "Static assets - can be cached long-term",
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable"
+      }
+    },
+    {
+      "type": "static",
+      "path": "/robots.txt",
+      "methods": ["GET"],
+      "comment": "SEO robots file",
+      "headers": {
+        "Cache-Control": "public, max-age=86400",
+        "Content-Type": "text/plain"
+      }
+    },
+    {
+      "type": "static",
+      "path": "/sitemap.xml",
+      "methods": ["GET"],
+      "comment": "SEO sitemap",
+      "headers": {
+        "Cache-Control": "public, max-age=86400",
+        "Content-Type": "application/xml"
+      }
+    },
+    {
+      "type": "spa",
+      "path": "/*",
+      "comment": "SPA routing with SEO headers",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "SAMEORIGIN",
+        "X-XSS-Protection": "1; mode=block",
+        "Referrer-Policy": "strict-origin-when-cross-origin"
+      }
+    }
+  ]
+}

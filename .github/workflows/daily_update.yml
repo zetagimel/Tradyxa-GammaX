@@ -1,0 +1,120 @@
+name: Daily Incremental Update
+
+on:
+  schedule:
+    # Run once daily after market close: 3:45 PM IST (10:15 AM UTC) on weekdays
+    - cron: "15 10 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  daily-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 60  # Increased from 45 to 60
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+    
+    - name: Install dependencies
+      run: |
+        pip install pandas numpy yfinance scikit-learn joblib scipy tqdm nselib
+    
+    # Check if CSVs exist (if not, this is effectively a first run)
+    - name: Check CSV status
+      run: |
+        CSV_COUNT=$(ls public/data/raw/*.csv 2>/dev/null | wc -l || echo 0)
+        echo "CSVs in repo: $CSV_COUNT"
+        if [ "$CSV_COUNT" -lt 100 ]; then
+          echo "⚠️ Warning: Few CSVs found. This run may take longer."
+          echo "Consider running 'Initial Setup' workflow first."
+        fi
+    
+    # STEP 1: Incremental update - appends new OHLCV to existing CSVs
+    - name: Append daily OHLCV to existing CSVs
+      run: |
+        # Run pipeline for NIFTY and BANKNIFTY first (priority indices)
+        python scripts/tradyxa_pipeline.py --mode run_all --ticker NIFTY --use-yf
+        python scripts/tradyxa_pipeline.py --mode run_all --ticker BANKNIFTY --use-yf
+        
+        # Run batch for all other tickers (incremental update)
+        python scripts/tradyxa_pipeline.py --mode batch_run --tickers-file scripts/nifty500.txt --max-workers 4 --use-yf
+      timeout-minutes: 120  # Increased to 2 hours for batch run
+      continue-on-error: true  # Don't fail entire workflow if some stocks timeout
+    
+    # STEP 1.5: Repair JSONs (Fix Volume Profile/Orderbook for Indices)
+    - name: Repair and Standardize JSONs
+      run: python scripts/repair_jsons.py
+      continue-on-error: true
+
+    - name: Verify JSON generation
+      run: |
+        STOCK_JSONS=$(ls public/data/ticker/*.NS.json 2>/dev/null | wc -l)
+        SLIPPAGE_FILES=$(ls public/data/ticker/*_slippage.json 2>/dev/null | wc -l)
+        echo "✅ Generated $STOCK_JSONS stock JSONs"
+        echo "✅ Generated $SLIPPAGE_FILES slippage files"
+        echo "Sample: $(ls public/data/ticker/*.NS.json 2>/dev/null | head -1)"
+        
+    # STEP 1.6: Audit Dashboard Health
+    - name: Audit Dashboard Content
+      run: python scripts/audit_dashboard.py
+      continue-on-error: true
+    
+    # STEP 2: Create friendly name copies for indices (NIFTY.json, BANKNIFTY.json)
+    - name: Create index friendly name copies
+      run: python scripts/create_index_copies.py
+      continue-on-error: true
+
+    # STEP 3: Apply ML predictions (uses pre-trained models from weekly run)
+    - name: Apply ML Predictions
+      run: python scripts/apply_models.py
+      continue-on-error: true
+
+    # STEP 4: Fetch live spot prices
+    - name: Fetch Live Spot Prices
+      run: python scripts/fetch_spot_prices.py
+      continue-on-error: true
+    
+    - name: Verify data before commit
+      run: |
+        echo "📊 Data Summary Before Commit:"
+        echo "  JSONs: $(ls public/data/ticker/*.NS.json 2>/dev/null | wc -l)"
+        echo "  Live Prices File: $(test -f public/data/live/spot_prices.json && echo 'EXISTS' || echo 'MISSING')"
+        echo "  Sample JSON has data: $(python3 -c "import json; d=json.load(open('public/data/ticker/NIFTY.json')); print(f\"Verdict: {d['metrics'].get('verdict', {}).get('direction')}\")" 2>/dev/null || echo 'ERROR')"
+      
+    # STEP 4: Single commit and push (ALWAYS RUN)
+    - name: Commit and push all changes
+      if: always()
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Add ALL changes (CSVs, JSONs, live prices)
+        echo "📝 Staging all data files..."
+        git add -A
+        
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "✅ No changes to commit - data is already up to date"
+        else
+          echo "📊 Changes to commit:"
+          git diff --staged --name-only | grep -E "\.json|\.csv|spot_prices" 2>/dev/null | head -20
+          
+          git commit -m "chore: daily data update $(date -u '+%Y-%m-%d %H:%M UTC') [deploy]"
+          
+          # Pull latest and push with conflict resolution (favoring this massive update)
+          echo "🚀 Pushing to GitHub..."
+          git pull origin main --no-rebase -X ours --allow-unrelated-histories
+          git push origin main
+          
+          echo "✅ Data successfully pushed to GitHub"
+          echo "⏳ Cloudflare Pages will auto-deploy within 1-2 minutes"
+        fi
